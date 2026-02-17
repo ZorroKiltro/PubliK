@@ -1,0 +1,171 @@
+#!/bin/bash
+# ============================================================
+# 🔍 BUSCADOR DE PATRONES EN CÓDIGO FUENTE WEB
+# Herramienta de Bug Bounty - Regex Hunter
+# Patrón: 12 caracteres + punto + 1 carácter
+# Ejemplo de match: "AbCdEf123456.x" o "api_secret_key.js"
+# ============================================================
+
+# --- COLORES para output bonito en terminal ---
+ROJO='\033[0;31m'
+VERDE='\033[0;32m'
+AMARILLO='\033[1;33m'
+CYAN='\033[0;36m'
+BLANCO='\033[1;37m'
+RESET='\033[0m'
+
+# --- BANNER ---
+echo -e "${CYAN}"
+echo "╔══════════════════════════════════════════╗"
+echo "║       🔍  REGEX PATTERN HUNTER           ║"
+echo "║     Bug Bounty Automation Tool           ║"
+echo "╚══════════════════════════════════════════╝"
+echo -e "${RESET}"
+
+# ============================================================
+# CONFIGURACIÓN - Modifica estas variables según tu objetivo
+# ============================================================
+
+# La URL objetivo (pásala como argumento o defínela aquí)
+URL="${1:-https://ejemplo.com}"
+
+# El patrón regex que buscamos:
+# .{12}   → exactamente 12 caracteres de cualquier tipo
+# \.      → un punto LITERAL (el \ escapa el punto)
+# .       → cualquier carácter después del punto
+PATRON='.{12}\..{1}'
+
+# Archivo temporal para guardar el HTML descargado
+ARCHIVO_TEMP="/tmp/pagina_temp_$$.html"
+
+# Archivo donde se guardan los resultados
+ARCHIVO_RESULTADO="resultados_patron_$(date +%Y%m%d_%H%M%S).txt"
+
+# ============================================================
+# PASO 1: Descargar el código fuente de la página
+# ============================================================
+echo -e "${AMARILLO}[*] Descargando código fuente de:${RESET} $URL"
+echo -e "${AMARILLO}[*] Por favor espera...${RESET}\n"
+
+# curl descarga la página:
+# -s = silencioso (sin barra de progreso)
+# -L = sigue redirecciones (si la URL redirige a otra)
+# -A = User-Agent para simular un navegador real
+# --max-time = límite de tiempo en segundos
+curl -s -L \
+     -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
+     --max-time 15 \
+     "$URL" -o "$ARCHIVO_TEMP"
+
+# Verificar si la descarga fue exitosa
+if [ ! -s "$ARCHIVO_TEMP" ]; then
+    echo -e "${ROJO}[!] ERROR: No se pudo descargar la página o está vacía${RESET}"
+    echo -e "${ROJO}[!] Verifica la URL e intenta de nuevo${RESET}"
+    exit 1
+fi
+
+TAMANIO=$(wc -c < "$ARCHIVO_TEMP")
+echo -e "${VERDE}[✓] Descarga exitosa - ${TAMANIO} bytes obtenidos${RESET}\n"
+
+# ============================================================
+# PASO 2: Aplicar el patrón regex sobre el código descargado
+# ============================================================
+echo -e "${AMARILLO}[*] Buscando patrón: ${BLANCO}${PATRON}${RESET}"
+echo -e "${AMARILLO}[*] (12 chars + punto + 1 char)${RESET}\n"
+
+# grep con opciones:
+# -o = muestra SOLO la parte que coincide (no toda la línea)
+# -E = modo Extended Regex (permite usar .{12} etc.)
+# -P = modo Perl Regex (más potente, permite \w, \d, etc.)
+# -n = muestra el número de línea donde se encontró
+
+echo -e "${CYAN}══════════════ RESULTADOS ══════════════${RESET}"
+
+# Búsqueda principal - extrae solo los matches exactos
+RESULTADOS=$(grep -oP "$PATRON" "$ARCHIVO_TEMP")
+
+if [ -z "$RESULTADOS" ]; then
+    echo -e "${ROJO}[!] No se encontraron coincidencias con el patrón básico${RESET}"
+else
+    TOTAL=$(echo "$RESULTADOS" | wc -l)
+    echo -e "${VERDE}[✓] Se encontraron ${BLANCO}${TOTAL}${VERDE} coincidencias:${RESET}\n"
+    
+    # Mostrar cada resultado con numeración
+    echo "$RESULTADOS" | sort -u | nl -ba | while read num match; do
+        echo -e "  ${CYAN}[$num]${RESET} ${BLANCO}$match${RESET}"
+    done
+fi
+
+echo -e "\n${CYAN}══════════════════════════════════════════${RESET}"
+
+# ============================================================
+# PASO 3: Búsquedas ADICIONALES más específicas para Bug Bounty
+# ============================================================
+echo -e "\n${AMARILLO}[*] Ejecutando búsquedas especializadas...${RESET}\n"
+
+# --- 3a: Buscar posibles API Keys (alfanumérico + punto) ---
+echo -e "${CYAN}🔑 Posibles API Keys / Tokens:${RESET}"
+grep -oP '[a-zA-Z0-9]{12}\.[a-zA-Z0-9]' "$ARCHIVO_TEMP" | sort -u | head -20
+echo ""
+
+# --- 3b: Buscar extensiones de archivos con 12 chars antes del punto ---
+echo -e "${CYAN}📁 Posibles archivos/rutas:${RESET}"
+grep -oP '\w{12}\.\w+' "$ARCHIVO_TEMP" | sort -u | head -20
+echo ""
+
+# --- 3c: Buscar dominios o subdominios con este patrón ---
+echo -e "${CYAN}🌐 Posibles subdominios/dominios:${RESET}"
+grep -oP '[a-z0-9]{12}\.[a-z]{2,}' "$ARCHIVO_TEMP" | sort -u | head -20
+echo ""
+
+# --- 3d: Ver el contexto (líneas completas donde aparece el patrón) ---
+echo -e "${CYAN}📄 Contexto (líneas donde aparece el patrón):${RESET}"
+grep -nP "$PATRON" "$ARCHIVO_TEMP" | head -10 | while IFS= read -r linea; do
+    # Resaltar el patrón encontrado en la línea
+    echo -e "  ${AMARILLO}${linea}${RESET}"
+done
+
+# ============================================================
+# PASO 4: Guardar todo en un archivo de reporte
+# ============================================================
+{
+    echo "======================================"
+    echo " REPORTE - REGEX PATTERN HUNTER"
+    echo " Fecha: $(date)"
+    echo " URL: $URL"
+    echo " Patrón buscado: $PATRON"
+    echo "======================================"
+    echo ""
+    echo "--- MATCHES EXACTOS DEL PATRÓN ---"
+    grep -oP "$PATRON" "$ARCHIVO_TEMP" | sort -u
+    echo ""
+    echo "--- POSIBLES API KEYS ---"
+    grep -oP '[a-zA-Z0-9]{12}\.[a-zA-Z0-9]' "$ARCHIVO_TEMP" | sort -u
+    echo ""
+    echo "--- POSIBLES ARCHIVOS ---"
+    grep -oP '\w{12}\.\w+' "$ARCHIVO_TEMP" | sort -u
+    echo ""
+    echo "--- CONTEXTO COMPLETO (líneas) ---"
+    grep -nP "$PATRON" "$ARCHIVO_TEMP"
+} > "$ARCHIVO_RESULTADO"
+
+echo -e "\n${VERDE}[✓] Reporte guardado en: ${BLANCO}${ARCHIVO_RESULTADO}${RESET}"
+
+# ============================================================
+# LIMPIEZA - Borrar archivo temporal
+# ============================================================
+rm -f "$ARCHIVO_TEMP"
+echo -e "${VERDE}[✓] Limpieza completada${RESET}"
+echo -e "\n${CYAN}¡Listo! Usa los resultados para analizar tu objetivo.${RESET}\n"
+
+# ============================================================
+# EJEMPLOS DE USO (descomenta para ver):
+# ============================================================
+# Para buscar solo letras y números antes del punto:
+#   grep -oP '[a-zA-Z0-9]{12}\.[a-zA-Z0-9]' archivo.html
+#
+# Para incluir guiones y underscores:
+#   grep -oP '[\w\-]{12}\.[\w]' archivo.html
+#
+# Para buscar con más de 1 char después del punto:
+#   grep -oP '.{12}\.\w{3}' archivo.html  ← 3 chars después del punto
